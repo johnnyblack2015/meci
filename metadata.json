@@ -1,0 +1,5 @@
+{
+  "name": "Staff Pager",
+  "description": "A real-time notification system for medical staff to call each other to cabins.",
+  "requestFramePermissions": []
+}
