@@ -21,6 +21,9 @@ async function startServer() {
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
 
+    // Send current users to the newly connected client
+    socket.emit("users_update", Array.from(users.values()));
+
     socket.on("register", (data: { name: string; designation: string; roomNumber: string; isOnline?: boolean }) => {
       users.set(socket.id, { 
         id: socket.id, 

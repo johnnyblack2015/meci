@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { Bell, Phone, User, Stethoscope, X, MapPin, Edit2, Search, Clock, ArrowUpRight, ArrowDownLeft, Check, PhoneMissed, Trash2 } from 'lucide-react';
+import { Bell, Phone, User, Stethoscope, X, MapPin, Edit2, Search, Clock, ArrowUpRight, ArrowDownLeft, Check, PhoneMissed, Trash2, Users, UserCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 type UserData = {
@@ -25,6 +25,7 @@ type CallRecord = {
 
 export default function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
   const [registered, setRegistered] = useState(false);
   const [name, setName] = useState('');
   const [designation, setDesignation] = useState('Doctor');
@@ -32,23 +33,54 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [missedCalls, setMissedCalls] = useState(0);
+  const [activeTab, setActiveTab] = useState<'staff' | 'history' | 'profile'>('staff');
   const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
   const [users, setUsers] = useState<UserData[]>([]);
   const [incomingCall, setIncomingCall] = useState<{ callerName: string; callerDesignation: string; callerRoomNumber: string } | null>(null);
   const [callingUser, setCallingUser] = useState<string | null>(null);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const registrationRef = useRef({ registered, name, designation, roomNumber, isOnline });
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    registrationRef.current = { registered, name, designation, roomNumber, isOnline };
+  }, [registered, name, designation, roomNumber, isOnline]);
 
   useEffect(() => {
     // Initialize audio
     audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
     audioRef.current.loop = true;
 
-    const newSocket = io();
+    const newSocket = io({
+      transports: ['polling', 'websocket'],
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    });
     setSocket(newSocket);
 
+    newSocket.on('connect', () => {
+      console.log('Connected to server with ID:', newSocket.id);
+      setIsConnected(true);
+      // Re-register if already registered before disconnect
+      const { registered: isReg, name: n, designation: d, roomNumber: r, isOnline: o } = registrationRef.current;
+      if (isReg && n && r) {
+        newSocket.emit('register', { name: n, designation: d, roomNumber: r, isOnline: o });
+      }
+    });
+
+    newSocket.on('disconnect', (reason) => {
+      console.log('Disconnected from server:', reason);
+      setIsConnected(false);
+    });
+
     newSocket.on('users_update', (updatedUsers: UserData[]) => {
+      console.log('Users updated:', updatedUsers);
       setUsers(updatedUsers.filter(u => u.id !== newSocket.id));
+    });
+
+    newSocket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error);
     });
 
     newSocket.on('incoming_call', (data: { callerName: string; callerDesignation: string; callerRoomNumber: string }) => {
@@ -272,217 +304,270 @@ export default function App() {
               <span className="text-[4px] font-semibold text-slate-400 tracking-widest uppercase mt-1">Rajamundhry</span>
             </div>
             <div>
-              <p className="text-xs text-slate-500">{users.length} staff online</p>
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{users.length} staff online</p>
+              <div className="flex items-center mt-0.5">
+                <div className={`w-1.5 h-1.5 rounded-full mr-1.5 ${isConnected ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'}`}></div>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">
+                  {isConnected ? 'Connected' : 'Reconnecting...'}
+                </span>
+              </div>
             </div>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-3xl w-full mx-auto p-4 flex flex-col">
-        {/* My Details Section */}
-        <div className="flex items-center justify-between mb-4 mt-2">
-          <h2 className="text-lg font-semibold text-slate-700">My Details</h2>
-          {missedCalls > 0 && (
-            <button 
-              onClick={() => setMissedCalls(0)}
-              className="flex items-center space-x-1.5 text-xs font-medium text-red-600 bg-red-50 px-2.5 py-1 rounded-full hover:bg-red-100 transition-colors"
-            >
-              <Bell size={12} className="animate-pulse" />
-              <span>{missedCalls} Missed Call{missedCalls !== 1 ? 's' : ''}</span>
-              <X size={12} className="ml-1 opacity-60 hover:opacity-100" />
-            </button>
-          )}
-        </div>
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-6 relative overflow-hidden">
-          {missedCalls > 0 && (
-            <div className="absolute top-0 left-0 w-1 h-full bg-red-500"></div>
-          )}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="relative">
-                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold
-                  ${designation === 'Doctor' ? 'bg-indigo-100 text-indigo-700' : 
-                    designation.includes('Nurse') ? 'bg-emerald-100 text-emerald-700' : 
-                    'bg-slate-100 text-slate-700'}`}
-                >
-                  {name.charAt(0).toUpperCase()}
+      <main className="flex-1 max-w-3xl w-full mx-auto p-4 flex flex-col pb-24">
+        {activeTab === 'profile' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <div className="flex items-center justify-between mb-4 mt-2">
+              <h2 className="text-xl font-bold text-slate-800">My Profile</h2>
+            </div>
+            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 mb-6 relative overflow-hidden">
+              <div className="flex flex-col items-center text-center space-y-4">
+                <div className="relative">
+                  <div className={`w-24 h-24 rounded-full flex items-center justify-center text-4xl font-bold shadow-inner
+                    ${designation === 'Doctor' ? 'bg-indigo-100 text-indigo-700' : 
+                      designation.includes('Nurse') ? 'bg-emerald-100 text-emerald-700' : 
+                      'bg-slate-100 text-slate-700'}`}
+                  >
+                    {name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className={`absolute bottom-1 right-1 w-6 h-6 border-4 border-white rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-slate-400'}`}></div>
                 </div>
-                <div className={`absolute bottom-0 right-0 w-3.5 h-3.5 border-2 border-white rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-slate-400'}`}></div>
-              </div>
-              <div>
-                <div className="flex items-center space-x-3">
-                  <h3 className="font-semibold text-slate-800 text-lg">{name}</h3>
+                
+                <div>
+                  <h3 className="font-bold text-slate-800 text-2xl">{name}</h3>
+                  <p className="text-slate-500 font-medium mt-1">{designation} • {roomNumber}</p>
+                </div>
+
+                <div className="w-full h-px bg-slate-100 my-4"></div>
+
+                <div className="flex items-center justify-between w-full px-4 py-3 bg-slate-50 rounded-2xl">
+                  <span className="font-semibold text-slate-700">Status</span>
                   <button
                     onClick={toggleStatus}
-                    className={`relative inline-flex h-6 w-16 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 overflow-hidden ${
+                    className={`relative inline-flex h-8 w-20 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 overflow-hidden ${
                       isOnline ? 'bg-emerald-500' : 'bg-slate-300'
                     }`}
                   >
                     <span
-                      className={`absolute inset-y-0 left-0 flex items-center justify-center w-1/2 text-[8px] font-bold text-white transition-opacity duration-200 ${
+                      className={`absolute inset-y-0 left-0 flex items-center justify-center w-1/2 text-[10px] font-bold text-white transition-opacity duration-200 ${
                         isOnline ? 'opacity-100' : 'opacity-0'
                       }`}
                     >
                       ON
                     </span>
                     <span
-                      className={`absolute inset-y-0 right-0 flex items-center justify-center w-1/2 text-[8px] font-bold text-slate-600 transition-opacity duration-200 ${
+                      className={`absolute inset-y-0 right-0 flex items-center justify-center w-1/2 text-[10px] font-bold text-slate-600 transition-opacity duration-200 ${
                         isOnline ? 'opacity-0' : 'opacity-100'
                       }`}
                     >
                       OFF
                     </span>
                     <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-sm z-10 ${
-                        isOnline ? 'translate-x-[2.25rem]' : 'translate-x-1'
+                      className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform shadow-sm z-10 ${
+                        isOnline ? 'translate-x-[3.25rem]' : 'translate-x-1'
                       }`}
                     />
                   </button>
                 </div>
-                <p className="text-sm text-slate-500">{designation} • {roomNumber}</p>
+
+                <button 
+                  onClick={() => setRegistered(false)}
+                  className="w-full mt-2 py-3.5 bg-white border-2 border-slate-200 text-slate-700 font-bold rounded-2xl hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center justify-center space-x-2"
+                >
+                  <Edit2 size={18} />
+                  <span>Edit Profile Details</span>
+                </button>
               </div>
             </div>
-            <button 
-              onClick={() => setRegistered(false)}
-              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors"
-              title="Edit Profile"
-            >
-              <Edit2 size={20} />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-slate-700">Available</h2>
-          <div className="relative w-64">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Search className="h-4 w-4 text-slate-400" />
-            </div>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="block w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors bg-white shadow-sm"
-              placeholder="Search staff..."
-            />
-          </div>
-        </div>
-        
-        {users.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-4 mb-8">
-            <User size={48} className="opacity-20" />
-            <p>No other staff members are currently online.</p>
-          </div>
-        ) : filteredUsers.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-4 mb-8">
-            <Search size={48} className="opacity-20" />
-            <p>No staff members found matching "{searchQuery}".</p>
-          </div>
-        ) : (
-          <div className="grid gap-3 mb-8">
-            {filteredUsers.map((user) => (
-              <motion.div
-                key={user.id}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between"
-              >
-                <div className="flex items-center space-x-4">
-                  <div className="relative">
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold
-                      ${user.designation === 'Doctor' ? 'bg-indigo-100 text-indigo-700' : 
-                        user.designation.includes('Nurse') ? 'bg-emerald-100 text-emerald-700' : 
-                        'bg-slate-100 text-slate-700'}`}
-                    >
-                      {user.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className={`absolute bottom-0 right-0 w-3.5 h-3.5 border-2 border-white rounded-full ${user.isOnline ? 'bg-emerald-500' : 'bg-slate-400'}`}></div>
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-slate-800">{user.name}</h3>
-                    <p className="text-sm text-slate-500">{user.designation} • {user.roomNumber}</p>
-                  </div>
-                </div>
-                
-                <button
-                  onClick={() => handleCall(user.id)}
-                  disabled={callingUser === user.id || !user.isOnline}
-                  className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl font-medium transition-all
-                    ${!user.isOnline 
-                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                      : callingUser === user.id 
-                        ? 'bg-green-100 text-green-700' 
-                        : 'bg-blue-50 text-blue-700 hover:bg-blue-100 active:bg-blue-200'}`}
-                >
-                  <Bell size={18} className={callingUser === user.id ? 'animate-bounce' : ''} />
-                  <span>{callingUser === user.id ? 'Calling...' : 'Call'}</span>
-                </button>
-              </motion.div>
-            ))}
           </div>
         )}
 
-        {/* Call History Section */}
-        <div className="flex items-center justify-between mb-4 mt-4">
-          <h2 className="text-lg font-semibold text-slate-700 flex items-center">
-            <Clock size={18} className="mr-2 text-slate-500" />
-            Call History
-          </h2>
-          {callHistory.length > 0 && (
-            <button
-              onClick={() => setCallHistory([])}
-              className="flex items-center space-x-1.5 text-xs font-medium text-slate-500 hover:text-red-600 px-2 py-1 rounded transition-colors"
-            >
-              <Trash2 size={14} />
-              <span>Clear</span>
-            </button>
-          )}
-        </div>
-        
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mb-8">
-          {callHistory.length === 0 ? (
-            <div className="p-8 text-center text-slate-400">
-              <Phone size={32} className="mx-auto mb-3 opacity-20" />
-              <p>No calls yet</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {callHistory.map((call) => (
-                <div key={call.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                  <div className="flex items-center space-x-4">
-                    <div className={`p-2 rounded-full ${
-                      call.type === 'incoming' 
-                        ? call.status === 'missed' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'
-                        : 'bg-blue-100 text-blue-600'
-                    }`}>
-                      {call.type === 'incoming' ? (
-                        call.status === 'missed' ? <PhoneMissed size={18} /> : <ArrowDownLeft size={18} />
-                      ) : (
-                        <ArrowUpRight size={18} />
-                      )}
-                    </div>
-                    <div>
-                      <h4 className="font-medium text-slate-800">{call.otherParty.name}</h4>
-                      <p className="text-xs text-slate-500">{call.otherParty.designation} • {call.otherParty.roomNumber}</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm text-slate-600 font-medium">{formatTime(call.timestamp)}</p>
-                    <p className={`text-xs font-medium capitalize ${
-                      call.status === 'missed' ? 'text-red-500' : 
-                      call.status === 'answered' ? 'text-emerald-500' : 
-                      'text-slate-400'
-                    }`}>
-                      {call.status}
-                    </p>
-                  </div>
+        {activeTab === 'staff' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
+              <h2 className="text-xl font-bold text-slate-800">Available Staff</h2>
+              <div className="relative w-full sm:w-72">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <Search className="h-4 w-4 text-slate-400" />
                 </div>
-              ))}
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="block w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors bg-white shadow-sm placeholder-slate-400"
+                  placeholder="Search by name or role..."
+                />
+              </div>
             </div>
-          )}
-        </div>
+            
+            {users.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-4 py-12">
+                <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mb-2">
+                  <User size={32} className="opacity-40" />
+                </div>
+                <p className="font-medium">No other staff members are currently online.</p>
+              </div>
+            ) : filteredUsers.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-4 py-12">
+                <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mb-2">
+                  <Search size={32} className="opacity-40" />
+                </div>
+                <p className="font-medium">No staff members found matching "{searchQuery}".</p>
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {filteredUsers.map((user) => (
+                  <motion.div
+                    key={user.id}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow"
+                  >
+                    <div className="flex items-center space-x-4">
+                      <div className="relative">
+                        <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold
+                          ${user.designation === 'Doctor' ? 'bg-indigo-100 text-indigo-700' : 
+                            user.designation.includes('Nurse') ? 'bg-emerald-100 text-emerald-700' : 
+                            'bg-slate-100 text-slate-700'}`}
+                        >
+                          {user.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className={`absolute bottom-0 right-0 w-4 h-4 border-2 border-white rounded-full ${user.isOnline ? 'bg-emerald-500' : 'bg-slate-400'}`}></div>
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-lg">{user.name}</h3>
+                        <p className="text-sm font-medium text-slate-500">{user.designation} • {user.roomNumber}</p>
+                      </div>
+                    </div>
+                    
+                    <button
+                      onClick={() => handleCall(user.id)}
+                      disabled={callingUser === user.id || !user.isOnline}
+                      className={`flex items-center justify-center w-12 h-12 sm:w-auto sm:px-6 sm:py-3 rounded-2xl font-bold transition-all
+                        ${!user.isOnline 
+                          ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                          : callingUser === user.id 
+                            ? 'bg-green-100 text-green-700' 
+                            : 'bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 shadow-md hover:shadow-lg'}`}
+                    >
+                      <Bell size={20} className={callingUser === user.id ? 'animate-bounce' : 'sm:mr-2'} />
+                      <span className="hidden sm:inline">{callingUser === user.id ? 'Calling...' : 'Page Staff'}</span>
+                    </button>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'history' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-slate-800 flex items-center">
+                <Clock size={20} className="mr-2 text-blue-600" />
+                Call History
+              </h2>
+              {callHistory.length > 0 && (
+                <button
+                  onClick={() => setCallHistory([])}
+                  className="flex items-center space-x-1.5 text-sm font-bold text-slate-500 hover:text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors"
+                >
+                  <Trash2 size={16} />
+                  <span>Clear All</span>
+                </button>
+              )}
+            </div>
+            
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+              {callHistory.length === 0 ? (
+                <div className="p-12 text-center text-slate-400">
+                  <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Phone size={32} className="opacity-30" />
+                  </div>
+                  <p className="font-medium text-lg text-slate-500">No calls yet</p>
+                  <p className="text-sm mt-1">Your call history will appear here.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {callHistory.map((call) => (
+                    <div key={call.id} className="p-5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center space-x-4">
+                        <div className={`p-3 rounded-full shadow-sm ${
+                          call.type === 'incoming' 
+                            ? call.status === 'missed' ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'
+                            : 'bg-blue-50 text-blue-600'
+                        }`}>
+                          {call.type === 'incoming' ? (
+                            call.status === 'missed' ? <PhoneMissed size={20} /> : <ArrowDownLeft size={20} />
+                          ) : (
+                            <ArrowUpRight size={20} />
+                          )}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-slate-800 text-lg">{call.otherParty.name}</h4>
+                          <p className="text-sm font-medium text-slate-500">{call.otherParty.designation} • {call.otherParty.roomNumber}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm text-slate-800 font-bold">{formatTime(call.timestamp)}</p>
+                        <p className={`text-xs font-bold uppercase tracking-wider mt-1 ${
+                          call.status === 'missed' ? 'text-red-500' : 
+                          call.status === 'answered' ? 'text-emerald-500' : 
+                          'text-slate-400'
+                        }`}>
+                          {call.status}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </main>
+
+      {/* Bottom Navigation */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 pb-safe z-40">
+        <div className="max-w-3xl mx-auto flex justify-around items-center px-2 py-2">
+          <button 
+            onClick={() => setActiveTab('staff')}
+            className={`flex flex-col items-center justify-center w-20 py-2 rounded-2xl transition-colors ${activeTab === 'staff' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+          >
+            <Users size={24} className={activeTab === 'staff' ? 'fill-blue-50' : ''} />
+            <span className="text-[10px] font-bold mt-1">Staff</span>
+          </button>
+          
+          <button 
+            onClick={() => {
+              setActiveTab('history');
+              setMissedCalls(0);
+            }}
+            className={`flex flex-col items-center justify-center w-20 py-2 rounded-2xl transition-colors relative ${activeTab === 'history' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+          >
+            <div className="relative">
+              <Clock size={24} className={activeTab === 'history' ? 'fill-blue-50' : ''} />
+              {missedCalls > 0 && (
+                <span className="absolute -top-1 -right-1.5 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border-2 border-white">
+                  {missedCalls}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] font-bold mt-1">History</span>
+          </button>
+          
+          <button 
+            onClick={() => setActiveTab('profile')}
+            className={`flex flex-col items-center justify-center w-20 py-2 rounded-2xl transition-colors ${activeTab === 'profile' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+          >
+            <UserCircle size={24} className={activeTab === 'profile' ? 'fill-blue-50' : ''} />
+            <span className="text-[10px] font-bold mt-1">Profile</span>
+          </button>
+        </div>
+      </nav>
 
       {/* Incoming Call Modal */}
       <AnimatePresence>
